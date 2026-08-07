@@ -100,3 +100,4 @@ With both `web` and `agent-service` running and all env vars filled in: sign up,
 ## CI
 
 `.github/workflows/ci.yml` runs lint/typecheck/build + `npm audit` for `web/`, an import check + `pip-audit` for `agent-service/`, and a secret scan (gitleaks) on every push/PR.
+# EasyApply.ai
