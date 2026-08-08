@@ -92,6 +92,10 @@ Verify: `curl http://localhost:8000/health` should return `{"status": "ok"}`, an
 
 With both `web` and `agent-service` running and all env vars filled in: sign up, fill out `/profile`, then upload a resume at `/resume`. The page uploads the file straight to Supabase Storage, records a `resumes` row, and calls the agent service to extract text, run Claude structured extraction, embed a summary via Voyage, and write `parsed_resume_data`. You'll land on `/resume/[id]` where the extracted skills/experience/education are editable before being used for matching in a later phase.
 
+### 6. Application tracker + question drafting (no automation yet)
+
+At `/applications`, click "Track a new application" and fill in the company/role, optionally pasting a job posting URL or the raw description — the agent service fetches and normalizes it into `job_postings` (skill extraction/embedding are deferred to Phase 3, when the matcher that consumes them exists). On the application's detail page, add any custom questions from the real application form; each defaults to "agent drafts" (per your profile's default answer mode, overridable per question). Click "Draft pending answers" to have the Question-Answer Drafter agent write grounded answers from your resume + the linked job description — review/edit them inline, or switch a question to "I'll answer it" to type your own. Update the status dropdown as the application moves through your pipeline (there's no browser automation yet — you still submit manually and mark it done).
+
 ## Deployment
 
 - **`web/`** → Vercel. Set the same env vars from `web/.env.example` in the Vercel project settings (production + preview scoped separately).
@@ -100,4 +104,3 @@ With both `web` and `agent-service` running and all env vars filled in: sign up,
 ## CI
 
 `.github/workflows/ci.yml` runs lint/typecheck/build + `npm audit` for `web/`, an import check + `pip-audit` for `agent-service/`, and a secret scan (gitleaks) on every push/PR.
-# EasyApply.ai

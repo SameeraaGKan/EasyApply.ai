@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ParseResumeRequest(BaseModel):
@@ -53,3 +53,43 @@ class ExtractedResumeData(BaseModel):
     projects: list[str] = Field(default_factory=list)
     total_years_experience: float | None = None
     seniority_level: SeniorityLevel | None = None
+
+
+# --- Job posting ingestion (plan Section 6) --------------------------------
+
+
+class IngestJobPostingRequest(BaseModel):
+    user_id: str
+    user_jwt: str
+    company_name: str
+    title: str
+    url: str | None = None
+    raw_text: str | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> "IngestJobPostingRequest":
+        if bool(self.url) == bool(self.raw_text):
+            raise ValueError("Provide exactly one of `url` or `raw_text`")
+        return self
+
+
+class IngestJobPostingResponse(BaseModel):
+    status: Literal["complete", "failed"]
+    job_posting_id: str | None = None
+    error: str | None = None
+
+
+# --- Question-Answer Drafter agent (plan Section 4.3) ----------------------
+
+
+class DraftAnswersRequest(BaseModel):
+    application_id: str
+    user_id: str
+    user_jwt: str
+    question_ids: list[str] | None = None
+
+
+class DraftAnswersResponse(BaseModel):
+    status: Literal["complete", "failed"]
+    drafted_count: int = 0
+    error: str | None = None

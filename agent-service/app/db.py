@@ -145,3 +145,129 @@ async def insert_parsed_resume_data(
                 resume_id,
                 user_id,
             )
+
+
+# --- job_postings (shared table — no user_id column; see plan Section 2's
+# "service-context operations" note. Written here rather than from Next.js
+# so the write path stays consistent whether a posting comes from manual
+# paste-in (this module) or a future job-board API ingestion job.) --------
+
+
+async def insert_job_posting(
+    *,
+    source: str,
+    company_name: str,
+    title: str,
+    description_raw: str,
+    description_url: str | None,
+) -> str:
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        INSERT INTO job_postings (source, company_name, title, description_raw, description_url)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+        """,
+        source,
+        company_name,
+        title,
+        description_raw,
+        description_url,
+    )
+    return str(row["id"])
+
+
+# --- Question-Answer Drafter Agent reads/writes (plan Section 4.3) --------
+
+
+async def get_application_for_user(application_id: str, user_id: str) -> asyncpg.Record | None:
+    pool = await get_pool()
+    return await pool.fetchrow(
+        "SELECT id, user_id, job_posting_id, resume_id FROM applications WHERE id = $1 AND user_id = $2",
+        application_id,
+        user_id,
+    )
+
+
+async def get_job_posting_description(job_posting_id: str) -> str | None:
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT description_raw FROM job_postings WHERE id = $1", job_posting_id
+    )
+    return row["description_raw"] if row else None
+
+
+def _decode_row_jsonb(row: asyncpg.Record | None, fields: tuple[str, ...]) -> dict | None:
+    """asyncpg returns jsonb columns as raw text by default (no codec is
+    registered globally — see insert_parsed_resume_data, which relies on
+    that same default to write pre-serialized JSON directly). Decode just
+    the fields callers need rather than registering a pool-wide codec that
+    would change the write path's expectations too."""
+    if row is None:
+        return None
+    result = dict(row)
+    for field in fields:
+        if result.get(field) is not None and isinstance(result[field], str):
+            result[field] = json.loads(result[field])
+    return result
+
+
+async def get_resume_context(resume_id: str | None, user_id: str) -> dict | None:
+    """Returns the parsed_resume_data fields needed to ground answer
+    drafting — either the resume explicitly attached to the application, or
+    the user's active resume if none was specified."""
+    pool = await get_pool()
+    if resume_id:
+        row = await pool.fetchrow(
+            "SELECT skills, work_experience, seniority_level, total_years_experience "
+            "FROM parsed_resume_data WHERE resume_id = $1 AND user_id = $2 "
+            "ORDER BY created_at DESC LIMIT 1",
+            resume_id,
+            user_id,
+        )
+    else:
+        row = await pool.fetchrow(
+            """
+            SELECT prd.skills, prd.work_experience, prd.seniority_level, prd.total_years_experience
+            FROM parsed_resume_data prd
+            JOIN resumes r ON r.id = prd.resume_id
+            WHERE r.user_id = $1 AND r.is_active = true
+            ORDER BY prd.created_at DESC LIMIT 1
+            """,
+            user_id,
+        )
+    return _decode_row_jsonb(row, ("skills", "work_experience"))
+
+
+async def get_pending_agent_questions(
+    application_id: str, question_ids: list[str] | None
+) -> list[asyncpg.Record]:
+    pool = await get_pool()
+    if question_ids:
+        return await pool.fetch(
+            """
+            SELECT id, question_text, question_type FROM application_questions
+            WHERE application_id = $1 AND answered_by = 'agent' AND answer_text IS NULL
+              AND id = ANY($2::uuid[])
+            ORDER BY order_index
+            """,
+            application_id,
+            question_ids,
+        )
+    return await pool.fetch(
+        """
+        SELECT id, question_text, question_type FROM application_questions
+        WHERE application_id = $1 AND answered_by = 'agent' AND answer_text IS NULL
+        ORDER BY order_index
+        """,
+        application_id,
+    )
+
+
+async def save_drafted_answer(question_id: str, answer: str) -> None:
+    pool = await get_pool()
+    await pool.execute(
+        "UPDATE application_questions SET agent_draft_answer = $1, answer_text = $1 WHERE id = $2",
+        answer,
+        question_id,
+    )

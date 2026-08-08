@@ -2,7 +2,7 @@ import voyageai
 
 from app.config import settings
 
-_client = voyageai.Client(api_key=settings.voyage_api_key)
+_client = voyageai.AsyncClient(api_key=settings.voyage_api_key)
 
 # Must match EMBEDDING_DIM in web/src/db/schema.ts — both sides pin to the
 # same model/dimensionality since embeddings are compared across the
@@ -11,11 +11,11 @@ MODEL = "voyage-3-lite"
 DIMENSIONS = 1024
 
 
-def embed_resume_summary(summary: str) -> list[float]:
+async def embed_resume_summary(summary: str) -> list[float]:
     """Embeds a normalized resume summary (not the full raw text — plan
     Section 5 calls for a dense, high-signal summary rather than the whole
     document) for storage in parsed_resume_data.embedding."""
-    result = _client.embed(
+    result = await _client.embed(
         [summary],
         model=MODEL,
         input_type="document",

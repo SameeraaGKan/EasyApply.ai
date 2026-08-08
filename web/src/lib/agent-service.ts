@@ -53,3 +53,47 @@ export function parseResume(input: {
     file_type: input.fileType,
   });
 }
+
+export type IngestJobPostingResult = {
+  status: "complete" | "failed";
+  job_posting_id?: string;
+  error?: string;
+};
+
+export function ingestJobPosting(
+  input: {
+    userId: string;
+    userAccessToken: string;
+    companyName: string;
+    title: string;
+  } & ({ url: string; rawText?: never } | { url?: never; rawText: string }),
+): Promise<IngestJobPostingResult> {
+  return callAgentService<IngestJobPostingResult>("/ingest/job-posting", {
+    user_id: input.userId,
+    user_jwt: input.userAccessToken,
+    company_name: input.companyName,
+    title: input.title,
+    url: input.url,
+    raw_text: input.rawText,
+  });
+}
+
+export type DraftAnswersResult = {
+  status: "complete" | "failed";
+  drafted_count: number;
+  error?: string;
+};
+
+export function draftAnswers(input: {
+  applicationId: string;
+  userId: string;
+  userAccessToken: string;
+  questionIds?: string[];
+}): Promise<DraftAnswersResult> {
+  return callAgentService<DraftAnswersResult>("/agents/draft-answers", {
+    application_id: input.applicationId,
+    user_id: input.userId,
+    user_jwt: input.userAccessToken,
+    question_ids: input.questionIds,
+  });
+}

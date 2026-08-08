@@ -1,9 +1,9 @@
-from anthropic import Anthropic
+from anthropic import AsyncAnthropic
 
 from app.config import settings
 from app.schemas import ExtractedResumeData
 
-_client = Anthropic(api_key=settings.anthropic_api_key)
+_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 _MODEL = "claude-sonnet-4-5"
 
@@ -78,11 +78,11 @@ _SYSTEM_PROMPT = (
 )
 
 
-def extract_resume_data(resume_text: str) -> ExtractedResumeData:
+async def extract_resume_data(resume_text: str) -> ExtractedResumeData:
     """Runs one Claude call with forced tool use to turn raw resume text
     into the structured shape stored in parsed_resume_data (plan Section
     4.1 — Resume Parser Agent)."""
-    response = _client.messages.create(
+    response = await _client.messages.create(
         model=_MODEL,
         max_tokens=4096,
         system=_SYSTEM_PROMPT,
@@ -96,3 +96,44 @@ def extract_resume_data(resume_text: str) -> ExtractedResumeData:
             return ExtractedResumeData.model_validate(block.input)
 
     raise RuntimeError("Claude did not return the expected tool call")
+
+
+_ANSWER_SYSTEM_PROMPT = (
+    "You draft answers to job application questions on behalf of a candidate, "
+    "grounded strictly in the resume context and job description provided. "
+    "Write in first person, as the candidate. Be specific and concrete — pull "
+    "real details (companies, technologies, outcomes) from the resume context "
+    "rather than writing generically. Never invent experience, skills, or "
+    "credentials that aren't in the resume context. Match the expected format: "
+    "for yes/no questions, answer with a single word plus at most one "
+    "supporting sentence; for short-answer questions, 2-4 sentences; for "
+    "long-answer questions, a well-organized paragraph or two. Return only the "
+    "answer text — no preamble, no quotation marks."
+)
+
+
+async def draft_answer(
+    *,
+    question_text: str,
+    question_type: str,
+    resume_context: str,
+    job_description: str | None,
+) -> str:
+    """Question-Answer Drafter Agent (plan Section 4.3): one Claude call per
+    question, grounded in the candidate's resume and (if available) the
+    target job description."""
+    job_context = (
+        f"\n\nJob description:\n{job_description}" if job_description else ""
+    )
+    prompt = (
+        f"Resume context:\n{resume_context}{job_context}\n\n"
+        f"Question type: {question_type}\n"
+        f"Application question: {question_text}"
+    )
+    response = await _client.messages.create(
+        model=_MODEL,
+        max_tokens=1024,
+        system=_ANSWER_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return "".join(block.text for block in response.content if block.type == "text").strip()

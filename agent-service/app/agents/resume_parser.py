@@ -43,7 +43,7 @@ async def run_resume_parser(request: ParseResumeRequest) -> ParseResumeResponse:
         if not raw_text.strip():
             raise ValueError("No extractable text found in resume")
 
-        extracted = extract_resume_data(raw_text)
+        extracted = await extract_resume_data(raw_text)
 
         recent_titles = [e.title for e in extracted.work_experience[:3]]
         summary = build_resume_summary(
@@ -52,7 +52,7 @@ async def run_resume_parser(request: ParseResumeRequest) -> ParseResumeResponse:
             total_years_experience=extracted.total_years_experience,
             seniority_level=extracted.seniority_level,
         )
-        embedding = embed_resume_summary(summary)
+        embedding = await embed_resume_summary(summary)
 
         await db.insert_parsed_resume_data(
             resume_id=request.resume_id,
