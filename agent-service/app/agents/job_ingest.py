@@ -41,5 +41,5 @@ async def run_job_ingest(request: IngestJobPostingRequest) -> IngestJobPostingRe
 
     except FetchError as e:
         return IngestJobPostingResponse(status="failed", error=str(e))
-    except Exception as e:  # noqa: BLE001 — agent-boundary catch-all, see run_resume_parser
+    except Exception as e:  # agent-boundary catch-all, see run_resume_parser
         return IngestJobPostingResponse(status="failed", error=str(e))

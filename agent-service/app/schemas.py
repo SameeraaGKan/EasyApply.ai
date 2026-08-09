@@ -93,3 +93,47 @@ class DraftAnswersResponse(BaseModel):
     status: Literal["complete", "failed"]
     drafted_count: int = 0
     error: str | None = None
+
+
+# --- Job-board ingestion + Matcher/Ranker agent (plan Sections 5-6) --------
+
+
+class ExtractedJobSkill(BaseModel):
+    name: str
+    required: bool = True
+
+
+class ExtractedJobRequirements(BaseModel):
+    skills: list[ExtractedJobSkill] = Field(default_factory=list)
+    seniority_level: SeniorityLevel | None = None
+
+
+class IngestJobBoardRequest(BaseModel):
+    # user_id/user_jwt are only used to verify the request and attribute the
+    # agent_runs audit-log entry to whoever triggered it — job_postings
+    # itself is a shared table with no per-user ownership (plan Section 2).
+    user_id: str
+    user_jwt: str
+    source: Literal["greenhouse", "lever"]
+    company_token: str
+    limit: int = Field(default=25, ge=1, le=200)
+
+
+class IngestJobBoardResponse(BaseModel):
+    status: Literal["complete", "failed"]
+    ingested_count: int = 0
+    skipped_count: int = 0
+    error: str | None = None
+
+
+class MatchRequest(BaseModel):
+    user_id: str
+    user_jwt: str
+    resume_id: str | None = None
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class MatchResponse(BaseModel):
+    status: Literal["complete", "failed"]
+    match_count: int = 0
+    error: str | None = None

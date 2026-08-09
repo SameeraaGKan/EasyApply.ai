@@ -21,6 +21,15 @@ def _vector_literal(embedding: list[float]) -> str:
     return "[" + ",".join(repr(float(x)) for x in embedding) + "]"
 
 
+def _parse_vector_literal(text: str) -> list[float]:
+    """Inverse of _vector_literal. Reading a `vector` column back through
+    asyncpg is otherwise undefined (no registered codec for the type), so
+    every SELECT that needs the embedding value explicitly casts it to
+    `::text` in SQL and parses it here rather than trusting asyncpg's
+    fallback handling for an unregistered OID."""
+    return [float(x) for x in text.strip("[]").split(",")]
+
+
 async def start_agent_run(user_id: str, agent_type: str, input_summary: dict) -> str:
     """Inserts the agent_runs audit-log row (plan Section 7 — every agent
     action must be traceable) and returns its id to close out later."""
@@ -175,6 +184,169 @@ async def insert_job_posting(
         description_url,
     )
     return str(row["id"])
+
+
+async def get_existing_job_posting_source_ids(source: str, source_ids: list[str]) -> set[str]:
+    """Lets the ingestion agent skip postings it's already ingested without
+    re-running the Claude/Voyage calls for them (plan Section 6 dedup)."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT source_id FROM job_postings WHERE source = $1 AND source_id = ANY($2::text[])",
+        source,
+        source_ids,
+    )
+    return {r["source_id"] for r in rows}
+
+
+async def upsert_job_posting_from_source(
+    *,
+    source: str,
+    source_id: str,
+    company_name: str,
+    title: str,
+    description_raw: str,
+    description_url: str | None,
+    location_text: str | None,
+    is_remote: bool,
+    employment_type: str | None,
+    seniority_level: str | None,
+    extracted_skills: list[dict],
+    embedding: list[float],
+    posted_at,
+) -> None:
+    pool = await get_pool()
+    await pool.execute(
+        """
+        INSERT INTO job_postings (
+            source, source_id, company_name, title, description_raw,
+            description_url, location_text, is_remote, employment_type,
+            seniority_level, extracted_skills, embedding, posted_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::vector, $13
+        )
+        ON CONFLICT (source, source_id) DO UPDATE SET
+            company_name = EXCLUDED.company_name,
+            title = EXCLUDED.title,
+            description_raw = EXCLUDED.description_raw,
+            description_url = EXCLUDED.description_url,
+            location_text = EXCLUDED.location_text,
+            is_remote = EXCLUDED.is_remote,
+            employment_type = EXCLUDED.employment_type,
+            seniority_level = EXCLUDED.seniority_level,
+            extracted_skills = EXCLUDED.extracted_skills,
+            embedding = EXCLUDED.embedding,
+            fetched_at = now(),
+            is_stale = false
+        """,
+        source,
+        source_id,
+        company_name,
+        title,
+        description_raw,
+        description_url,
+        location_text,
+        is_remote,
+        employment_type,
+        seniority_level,
+        json.dumps(extracted_skills),
+        _vector_literal(embedding),
+        posted_at,
+    )
+
+
+# --- Matcher/Ranker Agent reads/writes (plan Section 5) --------------------
+
+
+async def get_resume_for_matching(resume_id: str | None, user_id: str) -> dict | None:
+    """Same resume-context lookup as get_resume_context, plus the embedding
+    the matcher needs for the vector similarity retrieval step."""
+    pool = await get_pool()
+    if resume_id:
+        row = await pool.fetchrow(
+            "SELECT resume_id, skills, seniority_level, total_years_experience, embedding::text AS embedding "
+            "FROM parsed_resume_data WHERE resume_id = $1 AND user_id = $2 "
+            "ORDER BY created_at DESC LIMIT 1",
+            resume_id,
+            user_id,
+        )
+    else:
+        row = await pool.fetchrow(
+            """
+            SELECT prd.resume_id, prd.skills, prd.seniority_level, prd.total_years_experience,
+                   prd.embedding::text AS embedding
+            FROM parsed_resume_data prd
+            JOIN resumes r ON r.id = prd.resume_id
+            WHERE r.user_id = $1 AND r.is_active = true
+            ORDER BY prd.created_at DESC LIMIT 1
+            """,
+            user_id,
+        )
+    result = _decode_row_jsonb(row, ("skills",))
+    if result and result.get("embedding") is not None:
+        result["embedding"] = _parse_vector_literal(result["embedding"])
+    return result
+
+
+async def get_profile_remote_preference(user_id: str) -> str | None:
+    pool = await get_pool()
+    row = await pool.fetchrow("SELECT remote_preference FROM profiles WHERE id = $1", user_id)
+    return row["remote_preference"] if row else None
+
+
+async def get_candidate_job_postings(embedding: list[float], top_k: int) -> list[dict]:
+    """Dense retrieval step (plan Section 5 step 3): top-K job_postings by
+    cosine distance to the resume embedding, using the HNSW index defined
+    in web/src/db/schema.ts. `<=>` is pgvector's cosine-distance operator —
+    lower is more similar."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT id, company_name, title, description_raw, location_text, is_remote,
+               employment_type, seniority_level, extracted_skills, posted_at,
+               (embedding <=> $1::vector) AS distance
+        FROM job_postings
+        WHERE embedding IS NOT NULL
+        ORDER BY embedding <=> $1::vector
+        LIMIT $2
+        """,
+        _vector_literal(embedding),
+        top_k,
+    )
+    return [dict(_decode_row_jsonb(r, ("extracted_skills",))) for r in rows]
+
+
+async def upsert_match(
+    *,
+    user_id: str,
+    job_posting_id: str,
+    resume_id: str,
+    overall_score: float,
+    score_breakdown: dict,
+    match_rationale: str | None,
+) -> None:
+    # The `WHERE matches.status = 'suggested'` on the conflict update means
+    # re-running the matcher refreshes scores for untouched suggestions but
+    # never overwrites a match the user already shortlisted/dismissed/applied
+    # to — their decision wins over a re-ranking.
+    pool = await get_pool()
+    await pool.execute(
+        """
+        INSERT INTO matches (user_id, job_posting_id, resume_id, overall_score, score_breakdown, match_rationale)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        ON CONFLICT (user_id, job_posting_id) DO UPDATE SET
+            resume_id = EXCLUDED.resume_id,
+            overall_score = EXCLUDED.overall_score,
+            score_breakdown = EXCLUDED.score_breakdown,
+            match_rationale = EXCLUDED.match_rationale
+        WHERE matches.status = 'suggested'
+        """,
+        user_id,
+        job_posting_id,
+        resume_id,
+        overall_score,
+        json.dumps(score_breakdown),
+        match_rationale,
+    )
 
 
 # --- Question-Answer Drafter Agent reads/writes (plan Section 4.3) --------

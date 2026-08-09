@@ -1,0 +1,2 @@
+CREATE INDEX "job_postings_embedding_idx" ON "job_postings" USING hnsw ("embedding" vector_cosine_ops);--> statement-breakpoint
+CREATE INDEX "parsed_resume_data_embedding_idx" ON "parsed_resume_data" USING hnsw ("embedding" vector_cosine_ops);

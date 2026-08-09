@@ -2,7 +2,7 @@ import httpx
 import jwt as pyjwt
 
 from app import db
-from app.embeddings import embed_resume_summary, build_resume_summary
+from app.embeddings import embed_resume_query, build_resume_summary
 from app.llm import extract_resume_data
 from app.parsing.extract_text import extract_text
 from app.schemas import ParseResumeRequest, ParseResumeResponse
@@ -52,7 +52,7 @@ async def run_resume_parser(request: ParseResumeRequest) -> ParseResumeResponse:
             total_years_experience=extracted.total_years_experience,
             seniority_level=extracted.seniority_level,
         )
-        embedding = await embed_resume_summary(summary)
+        embedding = await embed_resume_query(summary)
 
         await db.insert_parsed_resume_data(
             resume_id=request.resume_id,
@@ -73,7 +73,7 @@ async def run_resume_parser(request: ParseResumeRequest) -> ParseResumeResponse:
         )
         return ParseResumeResponse(status="complete")
 
-    except Exception as e:  # noqa: BLE001 — intentional agent-boundary catch-all, see docstring
+    except Exception as e:  # intentional agent-boundary catch-all, see docstring
         await db.update_resume_parse_status(request.resume_id, request.user_id, "failed")
         await db.finish_agent_run(run_id, status="failed", error_message=str(e))
         return ParseResumeResponse(status="failed", error=str(e))

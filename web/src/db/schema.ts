@@ -226,7 +226,11 @@ export const parsedResumeData = pgTable(
     parseConfidence: numeric("parse_confidence"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("parsed_resume_data_user_id_idx").on(t.userId)],
+  (t) => [
+    index("parsed_resume_data_user_id_idx").on(t.userId),
+    index("parsed_resume_data_embedding_idx")
+      .using("hnsw", t.embedding.op("vector_cosine_ops")),
+  ],
 );
 
 // ---------------------------------------------------------------------------
@@ -261,7 +265,10 @@ export const jobPostings = pgTable(
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
     isStale: boolean("is_stale").notNull().default(false),
   },
-  (t) => [uniqueIndex("job_postings_source_source_id_idx").on(t.source, t.sourceId)],
+  (t) => [
+    uniqueIndex("job_postings_source_source_id_idx").on(t.source, t.sourceId),
+    index("job_postings_embedding_idx").using("hnsw", t.embedding.op("vector_cosine_ops")),
+  ],
 );
 
 // ---------------------------------------------------------------------------

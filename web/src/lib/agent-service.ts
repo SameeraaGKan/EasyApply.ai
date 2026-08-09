@@ -97,3 +97,46 @@ export function draftAnswers(input: {
     question_ids: input.questionIds,
   });
 }
+
+export type IngestJobBoardResult = {
+  status: "complete" | "failed";
+  ingested_count: number;
+  skipped_count: number;
+  error?: string;
+};
+
+export function ingestJobBoard(input: {
+  userId: string;
+  userAccessToken: string;
+  source: "greenhouse" | "lever";
+  companyToken: string;
+  limit?: number;
+}): Promise<IngestJobBoardResult> {
+  return callAgentService<IngestJobBoardResult>("/ingest/job-board", {
+    user_id: input.userId,
+    user_jwt: input.userAccessToken,
+    source: input.source,
+    company_token: input.companyToken,
+    limit: input.limit,
+  });
+}
+
+export type MatchResult = {
+  status: "complete" | "failed";
+  match_count: number;
+  error?: string;
+};
+
+export function runMatcher(input: {
+  userId: string;
+  userAccessToken: string;
+  resumeId?: string;
+  limit?: number;
+}): Promise<MatchResult> {
+  return callAgentService<MatchResult>("/agents/match", {
+    user_id: input.userId,
+    user_jwt: input.userAccessToken,
+    resume_id: input.resumeId,
+    limit: input.limit,
+  });
+}

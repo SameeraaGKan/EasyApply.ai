@@ -88,6 +88,6 @@ async def run_question_drafter(request: DraftAnswersRequest) -> DraftAnswersResp
         )
         return DraftAnswersResponse(status="complete", drafted_count=len(questions))
 
-    except Exception as e:  # noqa: BLE001 — agent-boundary catch-all, see run_resume_parser
+    except Exception as e:  # agent-boundary catch-all, see run_resume_parser
         await db.finish_agent_run(run_id, status="failed", error_message=str(e))
         return DraftAnswersResponse(status="failed", error=str(e))

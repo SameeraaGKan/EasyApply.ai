@@ -1,13 +1,19 @@
 from fastapi import Depends, FastAPI
 
+from app.agents.job_board_ingest import run_job_board_ingest
 from app.agents.job_ingest import run_job_ingest
+from app.agents.matcher import run_matcher
 from app.agents.question_drafter import run_question_drafter
 from app.agents.resume_parser import run_resume_parser
 from app.schemas import (
     DraftAnswersRequest,
     DraftAnswersResponse,
+    IngestJobBoardRequest,
+    IngestJobBoardResponse,
     IngestJobPostingRequest,
     IngestJobPostingResponse,
+    MatchRequest,
+    MatchResponse,
     ParseResumeRequest,
     ParseResumeResponse,
 )
@@ -62,5 +68,24 @@ async def draft_answers(request: DraftAnswersRequest) -> DraftAnswersResponse:
     return await run_question_drafter(request)
 
 
-# The matcher and form filler agents (plan Section 4.2, 4.4) land in
-# Phases 3-4.
+@app.post(
+    "/ingest/job-board",
+    dependencies=[Depends(require_internal_auth)],
+    response_model=IngestJobBoardResponse,
+)
+async def ingest_job_board(request: IngestJobBoardRequest) -> IngestJobBoardResponse:
+    """Greenhouse/Lever job-board ingestion (plan Section 6)."""
+    return await run_job_board_ingest(request)
+
+
+@app.post(
+    "/agents/match",
+    dependencies=[Depends(require_internal_auth)],
+    response_model=MatchResponse,
+)
+async def match(request: MatchRequest) -> MatchResponse:
+    """Matcher/Ranker Agent endpoint (plan Section 4.2)."""
+    return await run_matcher(request)
+
+
+# The form filler agent (plan Section 4.4) lands in Phase 4.

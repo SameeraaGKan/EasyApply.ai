@@ -8,6 +8,13 @@
       "when": 1786038124236,
       "tag": "0000_redundant_gorilla_man",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786209384790,
+      "tag": "0001_giant_joshua_kane",
+      "breakpoints": true
     }
   ]
 }
