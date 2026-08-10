@@ -15,6 +15,13 @@
       "when": 1786209384790,
       "tag": "0001_giant_joshua_kane",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786335360769,
+      "tag": "0002_round_mystique",
+      "breakpoints": true
     }
   ]
 }

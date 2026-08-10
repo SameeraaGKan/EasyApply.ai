@@ -327,6 +327,7 @@ export const applications = pgTable(
     applicationUrl: text("application_url"),
     resumeId: uuid("resume_id").references(() => resumes.id, { onDelete: "set null" }),
     coverLetterStoragePath: text("cover_letter_storage_path"),
+    formScreenshotStoragePath: text("form_screenshot_storage_path"),
     filledAt: timestamp("filled_at", { withTimezone: true }),
     userSubmittedAt: timestamp("user_submitted_at", { withTimezone: true }),
     notes: text("notes"),

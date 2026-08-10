@@ -30,7 +30,7 @@ You'll need accounts/projects on:
 3. **Railway** (railway.app) or Fly.io — hosts the Python agent service.
 4. **Anthropic** (console.anthropic.com) — API key for Claude. Used from Phase 1 (resume parsing).
 5. **Voyage AI** (dash.voyageai.com) — API key for embeddings. Used from Phase 1 (resume parsing).
-6. **Browserbase** (browserbase.com) — API key (used starting Phase 4).
+6. **Browserbase** (browserbase.com) — API key for the form-filler agent (Phase 4). Optional for local dev (falls back to local Chromium — see Phase 4 setup below), required in production.
 7. **Upstash** (upstash.com) — Redis for rate limiting (optional for local dev, needed before public launch).
 8. **Vercel** (vercel.com) — hosts `web/`.
 
@@ -73,6 +73,7 @@ cd agent-service
 python -m venv .venv
 ./.venv/Scripts/activate   # or source .venv/bin/activate on macOS/Linux
 pip install -r requirements.txt
+python -m playwright install chromium   # needed for the form-filler agent, see Phase 4 below
 cp .env.example .env       # fill in the vars below
 uvicorn app.main:app --reload
 ```
@@ -83,6 +84,7 @@ Env vars (`agent-service/.env`):
 - `ANTHROPIC_API_KEY` — from console.anthropic.com. Powers resume structured extraction (Claude tool use).
 - `VOYAGE_API_KEY` — from dash.voyageai.com. Powers the `voyage-3-lite` embeddings used for matching.
 - `DATABASE_URL` — same Neon pooled connection string as `web/.env.local`.
+- `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` — optional for local dev (see Phase 4 below); required in production.
 
 > Note: `asyncpg` doesn't yet ship prebuilt wheels for brand-new Python releases and can fail to build from source on some platforms. Use Python 3.12 for this venv (matches the Docker deployment target) if you hit a build error — `py -3.12 -m venv .venv` on Windows, or the equivalent `python3.12` on macOS/Linux.
 
@@ -102,10 +104,18 @@ At `/matches`, enter a company's Greenhouse or Lever board token (the slug in th
 
 Only Greenhouse and Lever are wired up (per plan Section 6's phased rollout — Ashby/Adzuna are a later addition). Greenhouse was verified against live company boards during development; Lever's response parsing is built defensively against its documented schema but wasn't verified against a live board with open postings, so spot-check it against a real company token before relying on it.
 
+### 8. Browser automation (form filling)
+
+On an application's detail page, click "Fill application" to run the Form-Filler agent: it opens the real application page in a browser, fills it from your profile, active resume, and any answered questions, and **stops before the submit button** — you always review the screenshot and click submit yourself on the real site, then mark the application "Submitted" in the status dropdown. A field-by-field report shows what filled successfully, what didn't stick, and any questions found on the page that don't have a matching answer yet (add them above and re-run).
+
+Only Greenhouse-hosted applications (`job-boards.greenhouse.io` / `boards.greenhouse.io`) are supported right now — this was verified against a real live application page during development (every field, including the react-select dropdowns and resume upload, confirmed working end to end). Anything else returns a clear "not supported yet" message rather than guessing at an unfamiliar form. Lever's application-form filler is a natural next addition once the job-board matching side (Section 7) has real Lever data to work from.
+
+**Browserbase is optional for local dev** — without `BROWSERBASE_API_KEY`/`BROWSERBASE_PROJECT_ID` set, the agent falls back to a locally-launched headless Chromium (that's what `playwright install chromium` in step 4 is for). The Browserbase code path itself is built against their documented REST API but wasn't exercised against a live account (none was available during development) — verify it against a real session before depending on it in production. **In production, Browserbase is required**: the deployed Docker image doesn't bundle a browser binary, so the local-Chromium fallback isn't available there.
+
 ## Deployment
 
 - **`web/`** → Vercel. Set the same env vars from `web/.env.example` in the Vercel project settings (production + preview scoped separately).
-- **`agent-service/`** → Railway (or Fly.io), using the included `Dockerfile`. Set `AGENT_SERVICE_BEARER_TOKEN` and `SUPABASE_PROJECT_URL`. Point `web`'s `AGENT_SERVICE_URL` at the deployed service.
+- **`agent-service/`** → Railway (or Fly.io), using the included `Dockerfile`. Set `AGENT_SERVICE_BEARER_TOKEN`, `SUPABASE_PROJECT_URL`, and — since the deployed image has no local browser binary — `BROWSERBASE_API_KEY`/`BROWSERBASE_PROJECT_ID` (required in production, unlike local dev). Point `web`'s `AGENT_SERVICE_URL` at the deployed service.
 
 ## CI
 

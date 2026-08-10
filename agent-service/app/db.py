@@ -355,8 +355,30 @@ async def upsert_match(
 async def get_application_for_user(application_id: str, user_id: str) -> asyncpg.Record | None:
     pool = await get_pool()
     return await pool.fetchrow(
-        "SELECT id, user_id, job_posting_id, resume_id FROM applications WHERE id = $1 AND user_id = $2",
+        "SELECT id, user_id, job_posting_id, resume_id, application_url "
+        "FROM applications WHERE id = $1 AND user_id = $2",
         application_id,
+        user_id,
+    )
+
+
+async def get_answered_questions(application_id: str) -> list[asyncpg.Record]:
+    """Only questions with an answer already on file — the form-filler
+    matches these against fields discovered on the real application page
+    (plan Section 4.4); anything without an answer yet can't be filled."""
+    pool = await get_pool()
+    return await pool.fetch(
+        "SELECT question_text, answer_text FROM application_questions "
+        "WHERE application_id = $1 AND answer_text IS NOT NULL",
+        application_id,
+    )
+
+
+async def get_profile_for_fill(user_id: str) -> asyncpg.Record | None:
+    pool = await get_pool()
+    return await pool.fetchrow(
+        "SELECT full_name, phone, eeo_gender, eeo_race, eeo_veteran_status, eeo_disability_status "
+        "FROM profiles WHERE id = $1",
         user_id,
     )
 

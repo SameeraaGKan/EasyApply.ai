@@ -27,6 +27,16 @@ class Settings(BaseSettings):
     # app/db.py), so a single connection string is sufficient for now.
     database_url: str
 
+    # Browserbase (plan Section 3/4.4 — the form-filler runs browser
+    # sessions here in production). Optional: when unset, the form-filler
+    # falls back to a locally-launched headless Chromium (app/browser/
+    # session.py) so this agent works in local dev without a Browserbase
+    # account — see README. Never falls back silently in a deployed
+    # environment that expects Browserbase; it's a dev convenience gated
+    # purely on whether these are configured.
+    browserbase_api_key: str | None = None
+    browserbase_project_id: str | None = None
+
     @property
     def supabase_jwks_url(self) -> str:
         return f"{self.supabase_project_url.rstrip('/')}/auth/v1/.well-known/jwks.json"

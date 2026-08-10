@@ -1,0 +1,1 @@
+ALTER TABLE "applications" ADD COLUMN "form_screenshot_storage_path" text;

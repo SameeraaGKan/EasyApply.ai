@@ -1,5 +1,6 @@
 from fastapi import Depends, FastAPI
 
+from app.agents.form_filler import run_form_filler
 from app.agents.job_board_ingest import run_job_board_ingest
 from app.agents.job_ingest import run_job_ingest
 from app.agents.matcher import run_matcher
@@ -8,6 +9,8 @@ from app.agents.resume_parser import run_resume_parser
 from app.schemas import (
     DraftAnswersRequest,
     DraftAnswersResponse,
+    FillApplicationRequest,
+    FillApplicationResponse,
     IngestJobBoardRequest,
     IngestJobBoardResponse,
     IngestJobPostingRequest,
@@ -88,4 +91,13 @@ async def match(request: MatchRequest) -> MatchResponse:
     return await run_matcher(request)
 
 
-# The form filler agent (plan Section 4.4) lands in Phase 4.
+@app.post(
+    "/agents/fill-application",
+    dependencies=[Depends(require_internal_auth)],
+    response_model=FillApplicationResponse,
+)
+async def fill_application(request: FillApplicationRequest) -> FillApplicationResponse:
+    """Form-Filler/Orchestrator Agent endpoint (plan Section 4.4). Stops
+    before the submit button — the caller is responsible for surfacing the
+    screenshot and letting the human take it from there."""
+    return await run_form_filler(request)

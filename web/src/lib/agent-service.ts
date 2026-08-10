@@ -140,3 +140,34 @@ export function runMatcher(input: {
     limit: input.limit,
   });
 }
+
+export type FieldOutcome = {
+  field_label: string;
+  status: "filled" | "skipped" | "failed";
+  detail?: string;
+};
+
+export type FillApplicationResult = {
+  status: "complete" | "failed" | "unsupported_site";
+  error?: string;
+  fields: FieldOutcome[];
+  unmatched_questions: string[];
+  screenshot_base64?: string;
+  browserbase_session_id?: string;
+};
+
+export function fillApplication(input: {
+  applicationId: string;
+  userId: string;
+  userAccessToken: string;
+  signedResumeUrl: string;
+  resumeFilename: string;
+}): Promise<FillApplicationResult> {
+  return callAgentService<FillApplicationResult>("/agents/fill-application", {
+    application_id: input.applicationId,
+    user_id: input.userId,
+    user_jwt: input.userAccessToken,
+    signed_resume_url: input.signedResumeUrl,
+    resume_filename: input.resumeFilename,
+  });
+}

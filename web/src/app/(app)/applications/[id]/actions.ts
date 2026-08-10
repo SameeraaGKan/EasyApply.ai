@@ -6,9 +6,14 @@ import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { requireUser, getCurrentSession } from "@/lib/dal/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { draftAnswers as draftAnswersOnAgentService } from "@/lib/agent-service";
+import {
+  draftAnswers as draftAnswersOnAgentService,
+  fillApplication as fillApplicationOnAgentService,
+  type FieldOutcome,
+} from "@/lib/agent-service";
+import { createClient } from "@/lib/supabase/server";
 import { dbForUser } from "@/db";
-import { applications, applicationQuestions } from "@/db/schema";
+import { applications, applicationQuestions, resumes } from "@/db/schema";
 
 async function requireOwnedApplication(applicationId: string) {
   const user = await requireUser();
@@ -158,6 +163,94 @@ export async function deleteQuestion(formData: FormData): Promise<void> {
     );
 
   revalidatePath(`/applications/${applicationId}`);
+}
+
+export type FillActionState = {
+  error: string | null;
+  fields?: FieldOutcome[];
+  unmatchedQuestions?: string[];
+};
+const fillOkState: FillActionState = { error: null };
+
+export async function fillApplicationAction(
+  _prevState: FillActionState,
+  formData: FormData,
+): Promise<FillActionState> {
+  const applicationId = String(formData.get("applicationId"));
+  const { user, session, db, application } = await requireOwnedApplication(applicationId);
+
+  const { success } = await checkRateLimit("fill-application", user.id, 10, 60 * 60);
+  if (!success) {
+    return { error: "Too many fill requests — please try again later." };
+  }
+
+  // Resolve which resume to attach: the one linked to this application, or
+  // the user's active resume if none was specified.
+  const [resume] = application.resumeId
+    ? await db.select().from(resumes).where(eq(resumes.id, application.resumeId)).limit(1)
+    : await db
+        .select()
+        .from(resumes)
+        .where(and(eq(resumes.userId, user.id), eq(resumes.isActive, true)))
+        .limit(1);
+  if (!resume) {
+    return { error: "Upload a resume before filling out an application." };
+  }
+
+  const supabase = await createClient();
+  const { data: signedUrlData, error: signError } = await supabase.storage
+    .from("resumes")
+    .createSignedUrl(resume.storagePath, 600);
+  if (signError || !signedUrlData) {
+    return { error: "Could not access your resume file. Please try again." };
+  }
+
+  const result = await fillApplicationOnAgentService({
+    applicationId,
+    userId: user.id,
+    userAccessToken: session.access_token,
+    signedResumeUrl: signedUrlData.signedUrl,
+    resumeFilename: resume.originalFilename,
+  });
+
+  if (result.status === "unsupported_site") {
+    return {
+      error:
+        result.error ??
+        "Automated filling isn't supported for this site yet — fill it out yourself and mark it done when you submit.",
+    };
+  }
+  if (result.status !== "complete") {
+    return { error: result.error ?? "Filling the application failed. Please try again." };
+  }
+
+  if (result.screenshot_base64) {
+    const screenshotPath = `${user.id}/${applicationId}-${Date.now()}.png`;
+    const { error: uploadError } = await supabase.storage
+      .from("application-screenshots")
+      .upload(screenshotPath, Buffer.from(result.screenshot_base64, "base64"), {
+        contentType: "image/png",
+        upsert: false,
+      });
+    if (!uploadError) {
+      await db
+        .update(applications)
+        .set({
+          status: "form_filled_pending_review",
+          formScreenshotStoragePath: screenshotPath,
+          filledAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(applications.id, applicationId));
+    }
+  }
+
+  revalidatePath(`/applications/${applicationId}`);
+  return {
+    ...fillOkState,
+    fields: result.fields,
+    unmatchedQuestions: result.unmatched_questions,
+  };
 }
 
 export async function draftPendingAnswers(

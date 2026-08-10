@@ -137,3 +137,29 @@ class MatchResponse(BaseModel):
     status: Literal["complete", "failed"]
     match_count: int = 0
     error: str | None = None
+
+
+# --- Form-Filler / Orchestrator agent (plan Section 4.4) -------------------
+
+
+class FillApplicationRequest(BaseModel):
+    application_id: str
+    user_id: str
+    user_jwt: str
+    signed_resume_url: str
+    resume_filename: str
+
+
+class FieldOutcome(BaseModel):
+    field_label: str
+    status: Literal["filled", "skipped", "failed"]
+    detail: str | None = None
+
+
+class FillApplicationResponse(BaseModel):
+    status: Literal["complete", "failed", "unsupported_site"]
+    error: str | None = None
+    fields: list[FieldOutcome] = Field(default_factory=list)
+    unmatched_questions: list[str] = Field(default_factory=list)
+    screenshot_base64: str | None = None
+    browserbase_session_id: str | None = None
