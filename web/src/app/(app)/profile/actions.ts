@@ -4,6 +4,8 @@ import "server-only";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { requireUser, getCurrentSession } from "@/lib/dal/auth";
+import { encryptNullable } from "@/lib/encryption";
+import { checkRateLimit } from "@/lib/rate-limit";
 import { dbForUser } from "@/db";
 import { profiles } from "@/db/schema";
 
@@ -38,12 +40,29 @@ export async function saveProfile(
     return { error: "Session expired — please sign in again." };
   }
 
+  const { success } = await checkRateLimit("save-profile", user.id, 30, 60 * 60);
+  if (!success) {
+    return { error: "Too many updates — please try again later." };
+  }
+
   const parsed = profileSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
 
-  const { linkedin, github, portfolio, ...rest } = parsed.data;
+  const { linkedin, github, portfolio, eeoGender, eeoRace, eeoVeteranStatus, eeoDisabilityStatus, ...rest } =
+    parsed.data;
+
+  // Voluntary EEO disclosures get application-level encryption before they
+  // ever reach Neon (plan Section 7 — extra-sensitive fields). Only the web
+  // app and the form-filler agent (which decrypts server-side to fill EEO
+  // form fields) ever see plaintext.
+  const encryptedEeo = {
+    eeoGender: encryptNullable(eeoGender),
+    eeoRace: encryptNullable(eeoRace),
+    eeoVeteranStatus: encryptNullable(eeoVeteranStatus),
+    eeoDisabilityStatus: encryptNullable(eeoDisabilityStatus),
+  };
 
   const db = dbForUser(session.access_token);
   await db
@@ -51,6 +70,7 @@ export async function saveProfile(
     .values({
       id: user.id,
       ...rest,
+      ...encryptedEeo,
       links: { linkedin, github, portfolio },
       onboardingCompleted: true,
     })
@@ -58,6 +78,7 @@ export async function saveProfile(
       target: profiles.id,
       set: {
         ...rest,
+        ...encryptedEeo,
         links: { linkedin, github, portfolio },
         onboardingCompleted: true,
         updatedAt: new Date(),

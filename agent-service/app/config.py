@@ -37,6 +37,18 @@ class Settings(BaseSettings):
     browserbase_api_key: str | None = None
     browserbase_project_id: str | None = None
 
+    # AES-256 key (base64, 32 raw bytes) for the voluntary EEO field
+    # encryption in app/crypto.py — must match web's PROFILE_ENCRYPTION_KEY
+    # exactly, same value on both sides. Optional here because only the
+    # form-filler agent needs to decrypt; every other agent leaves these
+    # columns untouched.
+    profile_encryption_key: str | None = None
+
+    # Error tracking (plan Section 7 — observability). Optional; the SDK
+    # no-ops safely when unset (verified locally) so there's nothing to
+    # configure for local dev, but set this before public launch.
+    sentry_dsn: str | None = None
+
     @property
     def supabase_jwks_url(self) -> str:
         return f"{self.supabase_project_url.rstrip('/')}/auth/v1/.well-known/jwks.json"

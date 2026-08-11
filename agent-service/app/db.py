@@ -3,6 +3,7 @@ import json
 import asyncpg
 
 from app.config import settings
+from app.crypto import decrypt_nullable
 from app.schemas import ExtractedResumeData
 
 _pool: asyncpg.Pool | None = None
@@ -374,13 +375,22 @@ async def get_answered_questions(application_id: str) -> list[asyncpg.Record]:
     )
 
 
-async def get_profile_for_fill(user_id: str) -> asyncpg.Record | None:
+async def get_profile_for_fill(user_id: str) -> dict | None:
     pool = await get_pool()
-    return await pool.fetchrow(
+    row = await pool.fetchrow(
         "SELECT full_name, phone, eeo_gender, eeo_race, eeo_veteran_status, eeo_disability_status "
         "FROM profiles WHERE id = $1",
         user_id,
     )
+    if row is None:
+        return None
+    # EEO fields are stored encrypted (plan Section 7) — see app/crypto.py,
+    # which mirrors web/src/lib/encryption.ts exactly so both sides read
+    # what the other writes.
+    result = dict(row)
+    for field in ("eeo_gender", "eeo_race", "eeo_veteran_status", "eeo_disability_status"):
+        result[field] = decrypt_nullable(result[field])
+    return result
 
 
 async def get_job_posting_description(job_posting_id: str) -> str | None:

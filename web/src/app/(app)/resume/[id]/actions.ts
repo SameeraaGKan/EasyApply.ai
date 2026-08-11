@@ -5,6 +5,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { requireUser, getCurrentSession } from "@/lib/dal/auth";
+import { checkRateLimit } from "@/lib/rate-limit";
 import { dbForUser } from "@/db";
 import { parsedResumeData, resumes } from "@/db/schema";
 
@@ -62,6 +63,11 @@ export async function updateParsedResumeData(
   const session = await getCurrentSession();
   if (!session) {
     return { error: "Session expired — please sign in again." };
+  }
+
+  const { success } = await checkRateLimit("update-parsed-resume", user.id, 30, 60 * 60);
+  if (!success) {
+    return { error: "Too many updates — please try again later." };
   }
 
   const parsed = updateSchema.safeParse(Object.fromEntries(formData));

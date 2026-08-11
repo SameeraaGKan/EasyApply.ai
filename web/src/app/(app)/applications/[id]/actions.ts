@@ -56,7 +56,12 @@ export async function updateStatus(
     return { error: "Invalid status." };
   }
 
-  const { db, application } = await requireOwnedApplication(applicationId);
+  const { user, db, application } = await requireOwnedApplication(applicationId);
+  const { success } = await checkRateLimit("update-application", user.id, 60, 60 * 60);
+  if (!success) {
+    return { error: "Too many updates — please try again later." };
+  }
+
   await db
     .update(applications)
     .set({
@@ -81,7 +86,12 @@ export async function updateNotes(
   const applicationId = String(formData.get("applicationId"));
   const notes = String(formData.get("notes") ?? "").slice(0, 5000);
 
-  const { db } = await requireOwnedApplication(applicationId);
+  const { user, db } = await requireOwnedApplication(applicationId);
+  const { success } = await checkRateLimit("update-application", user.id, 60, 60 * 60);
+  if (!success) {
+    return { error: "Too many updates — please try again later." };
+  }
+
   await db
     .update(applications)
     .set({ notes, updatedAt: new Date() })
@@ -107,7 +117,12 @@ export async function addQuestion(
     return { error: parsed.error.issues[0]?.message ?? "Invalid question." };
   }
 
-  const { db } = await requireOwnedApplication(applicationId);
+  const { user, db } = await requireOwnedApplication(applicationId);
+  const { success } = await checkRateLimit("update-application-questions", user.id, 60, 60 * 60);
+  if (!success) {
+    return { error: "Too many updates — please try again later." };
+  }
+
   const existing = await db
     .select({ id: applicationQuestions.id })
     .from(applicationQuestions)
@@ -133,7 +148,12 @@ export async function saveAnswer(
   const questionId = String(formData.get("questionId"));
   const answerText = String(formData.get("answerText") ?? "").slice(0, 5000);
 
-  const { db } = await requireOwnedApplication(applicationId);
+  const { user, db } = await requireOwnedApplication(applicationId);
+  const { success } = await checkRateLimit("update-application-questions", user.id, 60, 60 * 60);
+  if (!success) {
+    return { error: "Too many updates — please try again later." };
+  }
+
   await db
     .update(applicationQuestions)
     .set({ answerText })
@@ -152,7 +172,12 @@ export async function deleteQuestion(formData: FormData): Promise<void> {
   const applicationId = String(formData.get("applicationId"));
   const questionId = String(formData.get("questionId"));
 
-  const { db } = await requireOwnedApplication(applicationId);
+  const { user, db } = await requireOwnedApplication(applicationId);
+  const { success } = await checkRateLimit("update-application-questions", user.id, 60, 60 * 60);
+  if (!success) {
+    return;
+  }
+
   await db
     .delete(applicationQuestions)
     .where(

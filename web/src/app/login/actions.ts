@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
 const credentialsSchema = z.object({
   email: z.email(),
@@ -15,6 +16,12 @@ export async function signIn(
   _prevState: AuthActionState,
   formData: FormData,
 ): Promise<AuthActionState> {
+  // Brute-force protection — keyed by IP since there's no user_id yet.
+  const { success } = await checkRateLimit("sign-in", await getClientIp(), 10, 5 * 60);
+  if (!success) {
+    return { error: "Too many attempts — please wait a few minutes and try again." };
+  }
+
   const parsed = credentialsSchema.safeParse({
     email: formData.get("email"),
     password: formData.get("password"),
@@ -36,6 +43,12 @@ export async function signUp(
   _prevState: AuthActionState,
   formData: FormData,
 ): Promise<AuthActionState> {
+  // Signup-spam protection — keyed by IP.
+  const { success } = await checkRateLimit("sign-up", await getClientIp(), 5, 60 * 60);
+  if (!success) {
+    return { error: "Too many accounts created from this network — please try again later." };
+  }
+
   const parsed = credentialsSchema.safeParse({
     email: formData.get("email"),
     password: formData.get("password"),

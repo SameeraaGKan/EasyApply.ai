@@ -19,7 +19,7 @@ agent-service/   Python FastAPI + LangGraph service — the agent brains (resume
 - **Browser automation**: Browserbase, driven by the Python service. Never auto-submits.
 - **LLM**: Anthropic Claude API.
 
-Since Auth (Supabase) and the database (Neon) are different providers, row-level security is enforced via **Neon RLS (Neon Authorize)**, keyed off the Supabase-issued JWT, layered on top of app-level authorization checks. See plan Section 2 for details.
+Since Auth (Supabase) and the database (Neon) are different providers, row-level security is enforced via **Neon RLS** (`auth.user_id()`, backed by the `pg_session_jwt` extension — what the plan calls "Neon Authorize" has since been folded into Neon's "Data API" product surface; the underlying mechanism is unchanged and confirmed current, see [`docs/neon-rls-setup.sql`](docs/neon-rls-setup.sql)), keyed off the Supabase-issued JWT, layered on top of app-level authorization checks. See plan Section 2 and [`docs/incident-response.md`](docs/incident-response.md) for the operational side of this.
 
 ## Prerequisites — accounts to create
 
@@ -33,6 +33,7 @@ You'll need accounts/projects on:
 6. **Browserbase** (browserbase.com) — API key for the form-filler agent (Phase 4). Optional for local dev (falls back to local Chromium — see Phase 4 setup below), required in production.
 7. **Upstash** (upstash.com) — Redis for rate limiting (optional for local dev, needed before public launch).
 8. **Vercel** (vercel.com) — hosts `web/`.
+9. **Sentry** (sentry.io) — optional, error tracking for both services (Phase 5). Both SDKs no-op safely when unset.
 
 ## Local setup
 
@@ -46,7 +47,7 @@ You'll need accounts/projects on:
   npm install
   npm run db:migrate
   ```
-- **Neon RLS setup** (do this before storing real user data — see plan Section 2): in the Neon console, enable Neon Authorize and register your Supabase project as a trusted JWT issuer using Supabase's JWKS URL (`https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json`). Until this is configured, the app still enforces row ownership at the application layer (every query is scoped by `user_id`), but the database-level safety net isn't active yet.
+- **Neon RLS setup** (do this before storing real user data — see plan Section 2 and the notes at the top of [`docs/neon-rls-setup.sql`](docs/neon-rls-setup.sql)): in the Neon console, register your Supabase project as a trusted JWT issuer (look under Data API / Row-Level Security settings) using Supabase's JWKS URL (`https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json`), then run `docs/neon-rls-setup.sql` against your database. Until this is configured, the app still enforces row ownership at the application layer (every query is scoped by `user_id`), but the database-level safety net isn't active yet. **This has not been run against a live Neon project** — verify it with two real test accounts (confirm user A can't see user B's data) before trusting it.
 
 ### 2. Supabase Auth
 
@@ -56,7 +57,15 @@ You'll need accounts/projects on:
   2. In the Supabase dashboard: Database → Webhooks → new webhook on the `auth.users` table, event `INSERT`, HTTP method `POST`, URL pointing at your deployed (or tunneled, for local dev) `/api/internal/sync-user` endpoint, with an HTTP header `x-webhook-secret` set to the same secret.
   3. Sign up a test user and confirm a matching row appears in Neon's `users` table.
 
-### 3. Web app
+### 3. Field encryption key
+
+Voluntary EEO fields (`profiles.eeo_*`) are encrypted at the application layer before they ever reach Neon (plan Section 7) — both `web` and `agent-service` need the **identical** key. Generate one and put it in both `.env` files as `PROFILE_ENCRYPTION_KEY`:
+
+```
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+### 4. Web app
 
 ```
 cd web
@@ -66,7 +75,7 @@ npm run dev
 
 Visit `http://localhost:3000` — you'll be redirected to `/login` to sign up/sign in.
 
-### 4. Agent service
+### 5. Agent service
 
 ```
 cd agent-service
@@ -85,32 +94,45 @@ Env vars (`agent-service/.env`):
 - `VOYAGE_API_KEY` — from dash.voyageai.com. Powers the `voyage-3-lite` embeddings used for matching.
 - `DATABASE_URL` — same Neon pooled connection string as `web/.env.local`.
 - `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` — optional for local dev (see Phase 4 below); required in production.
+- `PROFILE_ENCRYPTION_KEY` — same value as `web/.env.local` (step 3 above).
+- `SENTRY_DSN` — optional, from sentry.io.
 
 > Note: `asyncpg` doesn't yet ship prebuilt wheels for brand-new Python releases and can fail to build from source on some platforms. Use Python 3.12 for this venv (matches the Docker deployment target) if you hit a build error — `py -3.12 -m venv .venv` on Windows, or the equivalent `python3.12` on macOS/Linux.
 
 Verify: `curl http://localhost:8000/health` should return `{"status": "ok"}`, and `curl -H "Authorization: Bearer <token>" http://localhost:8000/health/authenticated` should also return `{"status": "ok"}` (401 without the header, or with the wrong token).
 
-### 5. End-to-end resume flow
+### 6. End-to-end resume flow
 
 With both `web` and `agent-service` running and all env vars filled in: sign up, fill out `/profile`, then upload a resume at `/resume`. The page uploads the file straight to Supabase Storage, records a `resumes` row, and calls the agent service to extract text, run Claude structured extraction, embed a summary via Voyage, and write `parsed_resume_data`. You'll land on `/resume/[id]` where the extracted skills/experience/education are editable before being used for matching in a later phase.
 
-### 6. Application tracker + question drafting (no automation yet)
+### 7. Application tracker + question drafting (no automation yet)
 
 At `/applications`, click "Track a new application" and fill in the company/role, optionally pasting a job posting URL or the raw description — the agent service fetches and normalizes it into `job_postings` (manual paste-in skips skill extraction/embedding since nothing consumed them until Phase 3 — see below; job-board-sourced postings get the full pipeline). On the application's detail page, add any custom questions from the real application form; each defaults to "agent drafts" (per your profile's default answer mode, overridable per question). Click "Draft pending answers" to have the Question-Answer Drafter agent write grounded answers from your resume + the linked job description — review/edit them inline, or switch a question to "I'll answer it" to type your own. Update the status dropdown as the application moves through your pipeline (there's no browser automation yet — you still submit manually and mark it done).
 
-### 7. Job-board sourcing + matching
+### 8. Job-board sourcing + matching
 
 At `/matches`, enter a company's Greenhouse or Lever board token (the slug in their careers URL, e.g. `stripe` for `boards.greenhouse.io/stripe`) to pull in its open postings — each one gets skill-extracted (Claude) and embedded (Voyage) the same way a parsed resume does. Click "Find matches" to run the Matcher/Ranker agent: it retrieves the top candidates by embedding similarity against your active resume, re-ranks them with a weighted structured score (skill overlap, experience-level fit, location fit, recency — see plan Section 5), and writes an LLM-generated rationale for the top results. Shortlist or dismiss anything in the ranked list; dismissed postings drop out of the view.
 
 Only Greenhouse and Lever are wired up (per plan Section 6's phased rollout — Ashby/Adzuna are a later addition). Greenhouse was verified against live company boards during development; Lever's response parsing is built defensively against its documented schema but wasn't verified against a live board with open postings, so spot-check it against a real company token before relying on it.
 
-### 8. Browser automation (form filling)
+### 9. Browser automation (form filling)
 
 On an application's detail page, click "Fill application" to run the Form-Filler agent: it opens the real application page in a browser, fills it from your profile, active resume, and any answered questions, and **stops before the submit button** — you always review the screenshot and click submit yourself on the real site, then mark the application "Submitted" in the status dropdown. A field-by-field report shows what filled successfully, what didn't stick, and any questions found on the page that don't have a matching answer yet (add them above and re-run).
 
-Only Greenhouse-hosted applications (`job-boards.greenhouse.io` / `boards.greenhouse.io`) are supported right now — this was verified against a real live application page during development (every field, including the react-select dropdowns and resume upload, confirmed working end to end). Anything else returns a clear "not supported yet" message rather than guessing at an unfamiliar form. Lever's application-form filler is a natural next addition once the job-board matching side (Section 7) has real Lever data to work from.
+Only Greenhouse-hosted applications (`job-boards.greenhouse.io` / `boards.greenhouse.io`) are supported right now — this was verified against a real live application page during development (every field, including the react-select dropdowns and resume upload, confirmed working end to end). Anything else returns a clear "not supported yet" message rather than guessing at an unfamiliar form. Lever's application-form filler is a natural next addition once the job-board matching side (step 8) has real Lever data to work from.
 
-**Browserbase is optional for local dev** — without `BROWSERBASE_API_KEY`/`BROWSERBASE_PROJECT_ID` set, the agent falls back to a locally-launched headless Chromium (that's what `playwright install chromium` in step 4 is for). The Browserbase code path itself is built against their documented REST API but wasn't exercised against a live account (none was available during development) — verify it against a real session before depending on it in production. **In production, Browserbase is required**: the deployed Docker image doesn't bundle a browser binary, so the local-Chromium fallback isn't available there.
+**Browserbase is optional for local dev** — without `BROWSERBASE_API_KEY`/`BROWSERBASE_PROJECT_ID` set, the agent falls back to a locally-launched headless Chromium (that's what `playwright install chromium` in step 5 is for). The Browserbase code path itself is built against their documented REST API but wasn't exercised against a live account (none was available during development) — verify it against a real session before depending on it in production. **In production, Browserbase is required**: the deployed Docker image doesn't bundle a browser binary, so the local-Chromium fallback isn't available there.
+
+### 10. Hardening (Phase 5)
+
+Security/ops work that doesn't have its own UI:
+
+- **Field encryption**: voluntary EEO fields are AES-256-GCM encrypted at the application layer before storage (`web/src/lib/encryption.ts`, `agent-service/app/crypto.py` — cross-language byte-compatibility was verified directly, not assumed). Requires `PROFILE_ENCRYPTION_KEY` (step 3).
+- **Neon RLS**: database-level defense-in-depth on top of the app-layer scoping every query already has. See [`docs/neon-rls-setup.sql`](docs/neon-rls-setup.sql) and step 1's note above — apply it once you have a real Neon project, then verify with two test accounts.
+- **Rate limiting**: every mutation endpoint (web) and every agent/ingest endpoint (agent-service, via `slowapi`, defense-in-depth in case it's ever reachable directly) now has a limit — auth endpoints included, since those are brute-force/spam targets on a public app.
+- **Error tracking**: Sentry, wired into both services (`SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN`, optional, no-ops when unset). PII capture (`send_default_pii`, local variables) is explicitly disabled on both sides — this app's stack frames routinely hold resume text, EEO values, and JWTs.
+- **Dependency scanning**: `.github/dependabot.yml` opens weekly update PRs for `web/`, `agent-service/`, and the GitHub Actions themselves, on top of CI's `npm audit`/`pip-audit` gates.
+- **Incident response**: [`docs/incident-response.md`](docs/incident-response.md) — concrete steps for credential leaks, cross-user data exposure, agent cost runaway, and compromised dependencies, written for this app's actual architecture rather than generically. Includes the Browserbase session data retention policy.
 
 ## Deployment
 
@@ -119,4 +141,4 @@ Only Greenhouse-hosted applications (`job-boards.greenhouse.io` / `boards.greenh
 
 ## CI
 
-`.github/workflows/ci.yml` runs lint/typecheck/build + `npm audit` for `web/`, an import check + `pip-audit` for `agent-service/`, and a secret scan (gitleaks) on every push/PR.
+`.github/workflows/ci.yml` runs lint/typecheck/build + `npm audit` for `web/`, an import check + `pip-audit` for `agent-service/`, and a secret scan (gitleaks) on every push/PR. `.github/dependabot.yml` opens weekly dependency-update PRs across both services and the workflow itself.
