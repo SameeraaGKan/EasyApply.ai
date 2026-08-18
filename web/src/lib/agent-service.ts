@@ -108,7 +108,7 @@ export type IngestJobBoardResult = {
 export function ingestJobBoard(input: {
   userId: string;
   userAccessToken: string;
-  source: "greenhouse" | "lever";
+  source: "greenhouse" | "lever" | "ashby";
   companyToken: string;
   limit?: number;
 }): Promise<IngestJobBoardResult> {

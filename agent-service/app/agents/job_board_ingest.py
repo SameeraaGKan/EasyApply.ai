@@ -4,13 +4,13 @@ import jwt as pyjwt
 
 from app import db
 from app.embeddings import build_job_document, embed_job_document
-from app.ingestion_sources import greenhouse, lever
+from app.ingestion_sources import ashby, greenhouse, lever
 from app.ingestion_sources.base import CompanyNotFoundError, NormalizedJobPosting
 from app.llm import extract_job_requirements
 from app.schemas import IngestJobBoardRequest, IngestJobBoardResponse
 from app.security import verify_user_jwt
 
-_SOURCES = {"greenhouse": greenhouse, "lever": lever}
+_SOURCES = {"greenhouse": greenhouse, "lever": lever, "ashby": ashby}
 _CONCURRENCY = 5
 
 

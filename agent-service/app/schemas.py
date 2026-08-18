@@ -114,7 +114,7 @@ class IngestJobBoardRequest(BaseModel):
     # itself is a shared table with no per-user ownership (plan Section 2).
     user_id: str
     user_jwt: str
-    source: Literal["greenhouse", "lever"]
+    source: Literal["greenhouse", "lever", "ashby"]
     company_token: str
     limit: int = Field(default=25, ge=1, le=200)
 

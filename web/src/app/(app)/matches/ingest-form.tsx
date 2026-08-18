@@ -20,13 +20,15 @@ export function IngestForm() {
       <div className="flex flex-col gap-2">
         <h2 className="font-medium">Pull in postings from a company</h2>
         <p className="text-sm text-neutral-500">
-          Enter a company&apos;s Greenhouse or Lever board token — usually the slug in their
-          careers URL (e.g. <code>stripe</code> for boards.greenhouse.io/stripe).
+          Enter a company&apos;s Greenhouse, Lever, or Ashby board token — usually the slug in
+          their careers URL (e.g. <code>stripe</code> for boards.greenhouse.io/stripe, or{" "}
+          <code>ramp</code> for jobs.ashbyhq.com/ramp).
         </p>
         <form action={ingestAction} className="flex gap-2">
           <select name="source" defaultValue="greenhouse" className={inputClass}>
             <option value="greenhouse">Greenhouse</option>
             <option value="lever">Lever</option>
+            <option value="ashby">Ashby</option>
           </select>
           <input
             name="companyToken"

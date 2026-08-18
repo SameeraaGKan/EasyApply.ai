@@ -14,7 +14,7 @@ export type ActionState = { error: string | null };
 const okState: ActionState = { error: null };
 
 const ingestSchema = z.object({
-  source: z.enum(["greenhouse", "lever"]),
+  source: z.enum(["greenhouse", "lever", "ashby"]),
   companyToken: z
     .string()
     .min(1)
